@@ -1,13 +1,17 @@
+#include <Wire.h>
 #include <Adafruit_MLX90640.h>
 
 Adafruit_MLX90640 mlx;
-float frame[24 * 32];
+float frame[24 * 32]; // 768 values
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial) delay(10);
+  delay(2000);  
 
-  Serial.println("MLX90640 Test");
+  Serial.println("MLX90640 Thermal Stream Starting...");
+
+  Wire.begin();
+  Wire.setClock(400000);  
 
   if (!mlx.begin(MLX90640_I2CADDR_DEFAULT, &Wire)) {
     Serial.println("ERROR: MLX90640 not found!");
@@ -20,16 +24,18 @@ void setup() {
 }
 
 void loop() {
+  // Read full thermal frame
   if (mlx.getFrame(frame) != 0) {
-    Serial.println("Frame read error");
+    Serial.println("ERR");
     return;
   }
 
-  // Print a few sample pixels + center pixel
+  //  CSV (for Python visualization)
+  for (int i = 0; i < 768; i++) {
+    Serial.print(frame[i]);
+    if (i < 767) Serial.print(",");
+  }
+  Serial.println();
 
-  Serial.print("Center Temp: ");
-  Serial.print(center);
-  Serial.println(" °C");
-
-  delay(500);
+  delay(100); // ~10 FPS
 }
