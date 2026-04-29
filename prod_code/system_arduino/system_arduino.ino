@@ -26,11 +26,20 @@ static bool tdsReady = false;
 static int samplesCollected = 0;
 
 //Pump initialization
-const unsigned long PUMP_INTERVAL = 15UL * 60UL * 1000UL;  // 15 minutes
-const unsigned long PUMP_ON_TIME  = 3000UL;                // 3 seconds on
+const unsigned long PUMP_ON_TIME  = 5000UL;  // 5 seconds on
+const unsigned long PUMP_OFF_TIME = 5000UL;  // 5 seconds off before it can run again
 
-unsigned long lastPhDoseTime = 0;
-unsigned long lastTdsDoseTime = 0;
+bool phPumpRunning = false;
+bool tdsPumpRunning = false;
+
+int activePhPumpPin = -1;
+int activeTdsPumpPin = -1;
+
+unsigned long phPumpStartTime = 0;
+unsigned long tdsPumpStartTime = 0;
+
+unsigned long lastPhPumpOffTime = 0;
+unsigned long lastTdsPumpOffTime = 0;
 
 const int PH_DOWN_RELAY_PIN = 9;
 const int PH_UP_RELAY_PIN = 10;
@@ -60,13 +69,10 @@ pinMode(TDS_DOWN_RELAY_PIN, OUTPUT);
 digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_OFF);  // start OFF
 pinMode(TDS_UP_RELAY_PIN, OUTPUT);
 digitalWrite(TDS_UP_RELAY_PIN, RELAY_OFF);  // start OFF
-pinMode(RESEVOIR_RELAY_PIN, OUTPUT);
-digitalWrite(RESEVOIR_RELAY_PIN, RELAY_OFF);
+
 //
-
-
-  analogReadResolution(10);
 }
+
 
 void loop() {
 //set cursor for LCD to 0,0
@@ -134,42 +140,66 @@ lcd.setCursor(0, 0);
 
 /////////////////////////////////////////////////////////////////////pump
 unsigned long now = millis();
-// default: all pumps OFF
-digitalWrite(PH_DOWN_RELAY_PIN, RELAY_OFF);
-digitalWrite(PH_UP_RELAY_PIN, RELAY_OFF);
-digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_OFF);
-digitalWrite(TDS_UP_RELAY_PIN, RELAY_OFF);
 
-digitalWrite(RESEVOIR_RELAY_PIN, RELAY_ON);
-// pH pump runs only once every 15 minutes if needed
-if(now - lastPhDoseTime >= PUMP_INTERVAL){
-  if(phValue > 6){
-      digitalWrite(PH_DOWN_RELAY_PIN, RELAY_ON);   // pump ON 
-      delay(PUMP_ON_TIME);
-      digitalWrite(PH_DOWN_RELAY_PIN, RELAY_OFF);   // pump ON
-      lastPhDoseTime = now;
+// Do not run pumps before TDS has a real value
+if (tdsValue == 0.00) {
+  digitalWrite(PH_DOWN_RELAY_PIN, RELAY_OFF);
+  digitalWrite(PH_UP_RELAY_PIN, RELAY_OFF);
+  digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_OFF);
+  digitalWrite(TDS_UP_RELAY_PIN, RELAY_OFF);
 
+  phPumpRunning = false;
+  tdsPumpRunning = false;
+  activePhPumpPin = -1;
+  activeTdsPumpPin = -1;
+  return;
+}
+
+// Turn pH pump OFF after 5 seconds
+if (phPumpRunning && (now - phPumpStartTime >= PUMP_ON_TIME)) {
+  digitalWrite(activePhPumpPin, RELAY_OFF);
+  phPumpRunning = false;
+  activePhPumpPin = -1;
+  lastPhPumpOffTime = now;
+}
+
+// Turn TDS pump OFF after 5 seconds
+if (tdsPumpRunning && (now - tdsPumpStartTime >= PUMP_ON_TIME)) {
+  digitalWrite(activeTdsPumpPin, RELAY_OFF);
+  tdsPumpRunning = false;
+  activeTdsPumpPin = -1;
+  lastTdsPumpOffTime = now;
+}
+
+// Start pH pump if needed and if it is not already running
+if (!phPumpRunning && (lastPhPumpOffTime == 0 || now - lastPhPumpOffTime >= PUMP_OFF_TIME)) {
+  if (phValue < 6) {
+    digitalWrite(PH_UP_RELAY_PIN, RELAY_ON);
+    activePhPumpPin = PH_UP_RELAY_PIN;
+    phPumpStartTime = now;
+    phPumpRunning = true;
   }
-  else if(phValue < 6){
-    digitalWrite(PH_UP_RELAY_PIN, RELAY_ON);   // pump On
-    delay(PUMP_ON_TIME);
-    digitalWrite(PH_UP_RELAY_PIN, RELAY_OFF); //pump off
-    lastPhDoseTime = now;
+  else if (phValue > 8) {
+    digitalWrite(PH_DOWN_RELAY_PIN, RELAY_ON);
+    activePhPumpPin = PH_DOWN_RELAY_PIN;
+    phPumpStartTime = now;
+    phPumpRunning = true;
   }
 }
 
-if (now - lastTdsDoseTime >= PUMP_INTERVAL){
-  if(tdsValue < 800){
-    digitalWrite(TDS_UP_RELAY_PIN, RELAY_ON);   // pump On
-    delay(PUMP_ON_TIME);
-    digitalWrite(TDS_UP_RELAY_PIN, RELAY_OFF); //pump off
-    lastTdsDoseTime = now;
+// Start TDS pump if needed and if it is not already running
+if (!tdsPumpRunning && (lastTdsPumpOffTime == 0 || now - lastTdsPumpOffTime >= PUMP_OFF_TIME)) {
+  if (tdsValue > 1000) {
+    digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_ON);
+    activeTdsPumpPin = TDS_DOWN_RELAY_PIN;
+    tdsPumpStartTime = now;
+    tdsPumpRunning = true;
   }
-  else if(tdsValue > 800){
-    digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_ON);   // pump On
-    delay(PUMP_ON_TIME);
-    digitalWrite(TDS_DOWN_RELAY_PIN, RELAY_OFF); //pump off
-    lastTdsDoseTime = now;
+  else if (tdsValue < 800) {
+    digitalWrite(TDS_UP_RELAY_PIN, RELAY_ON);
+    activeTdsPumpPin = TDS_UP_RELAY_PIN;
+    tdsPumpStartTime = now;
+    tdsPumpRunning = true;
   }
 }
 /////////////////pump
@@ -201,4 +231,5 @@ int getMedianNum(int bArray[], int iFilterLen)
   else
     bTemp = (bTab[iFilterLen / 2] + bTab[iFilterLen / 2 - 1]) / 2;
   return bTemp;
+
 }
